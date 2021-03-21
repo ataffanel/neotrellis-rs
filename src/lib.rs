@@ -27,7 +27,7 @@ impl Color {
 }
 
 #[repr(u8)]
-#[derive(TryFromPrimitive)]
+#[derive(TryFromPrimitive, IntoPrimitive)]
 #[derive(Clone, Copy)]
 pub enum Event {
     High = 0,
@@ -37,7 +37,7 @@ pub enum Event {
 }
 #[derive(Clone, Copy)]
 pub struct KeypadEvent {
-    pub key: u8,
+    pub key: Key,
     pub event: Event,
 }
 
@@ -50,7 +50,7 @@ pub struct NeoTrellis<I2C, DELAY>
     address: u8,
 }
 
-// Internal storate is the key index
+#[derive(Clone, Copy)]
 pub struct Key(u8);
 
 impl Key {
@@ -62,7 +62,7 @@ impl Key {
         ((self.0 & 0xC) << 1) | (self.0 & 0x03)
     }
 
-    pub fn as_index(&self) -> u8 {
+    pub fn index(&self) -> u8 {
         self.0
     }
 
@@ -146,16 +146,22 @@ impl<I2C, DELAY> NeoTrellis<I2C, DELAY>
     }
 
     fn setup_keypad(&mut self) -> Result<(), Error<I2C>> {
-        // self.write_register(Module::Keypad, KEYPAD_COUNT, );
-
-        // Enable only rising and falling edge detections for all keys
+        // Enable only rising and falling edge detections for all 16 keys
         for i in 0..16 {
-            let keycode = Key::from_index(i).serialize();
-            self.write_register(Module::Keypad, KEYPAD_EVENT, &[keycode, 0x02])?;
-            self.write_register(Module::Keypad, KEYPAD_EVENT, &[keycode, 0x04])?;
-            self.write_register(Module::Keypad, KEYPAD_EVENT, &[keycode, 0x09])?;
-            self.write_register(Module::Keypad, KEYPAD_EVENT, &[keycode, 0x11])?;
+            let key = Key::from_index(i);
+            self.set_key_event(key, Event::Low, false)?;
+            self.set_key_event(key, Event::High, false)?;
+            self.set_key_event(key, Event::Falling, true)?;
+            self.set_key_event(key, Event::Rising, true)?;
         }
+
+        Ok(())
+    }
+
+    pub fn set_key_event(&mut self, key: Key, event: Event, enable: bool) -> Result<(), Error<I2C>>
+    {
+        let command = (1 << (u8::from(event) + 1)) | (enable as u8);
+        self.write_register(Module::Keypad, KEYPAD_EVENT, &[key.serialize(), command])?;
 
         Ok(())
     }
@@ -217,7 +223,7 @@ impl<I2C, DELAY> NeoTrellis<I2C, DELAY>
                 None
             } else {
                 Some(KeypadEvent {
-                    key: Key::deserialize(item >> 2).as_index(),
+                    key: Key::deserialize(item >> 2),
                     event: Event::try_from(item & 0x03).unwrap(),
                 })
             };
